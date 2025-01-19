@@ -1,0 +1,188 @@
+name: 'Terraform - Deploy'
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'PartIII/environments/**/*.tf'
+      - 'PartIII/environments/**/*.tfvars'
+      - '.github/workflows/terraform-deploy.yml'
+  workflow_dispatch:
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+  NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+
+jobs:
+  discover-environments:
+    runs-on: ubuntu-latest
+    outputs:
+      environments: ${{ steps.set-environments.outputs.environments }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Get Environments
+        id: set-environments
+        run: |
+          ENVIRONMENTS=$(ls -d PartIII/environments/*/ | xargs -n 1 basename | jq -R -s -c 'split("\n")[:-1]')
+          echo "environments=${ENVIRONMENTS}" >> $GITHUB_OUTPUT
+
+  terraform-plan:
+    needs: discover-environments
+    name: 'Terraform Plan - ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.discover-environments.outputs.environments) }}
+    environment: ${{ matrix.environment }}
+    defaults:
+      run:
+        working-directory: PartIII/environments/${{ matrix.environment }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.7.0"
+
+    - name: Terraform Init
+      run: terraform init
+      
+    - name: Terraform Plan
+      run: |
+        terraform plan -out=tfplan
+        terraform show -no-color tfplan > tfplan.txt
+      
+    - name: Upload Plan
+      uses: actions/upload-artifact@v4
+      with:
+        name: tfplan-${{ matrix.environment }}
+        path: |
+          PartIII/environments/${{ matrix.environment }}/tfplan
+          PartIII/environments/${{ matrix.environment }}/tfplan.txt
+        retention-days: 5
+
+  display-plan:
+    needs: [discover-environments, terraform-plan]
+    name: 'Display Plan - ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.discover-environments.outputs.environments) }}
+    
+    steps:
+    - name: Download Plan
+      uses: actions/download-artifact@v4
+      with:
+        name: tfplan-${{ matrix.environment }}
+
+    - name: Display Terraform Plan
+      run: |
+        echo "Terraform Plan for environment: ${{ matrix.environment }}"
+        echo "----------------------------------------"
+        cat tfplan.txt
+        echo "----------------------------------------"
+        echo "Please review the plan above and approve the deployment in the next step."
+
+  manual-approval:
+    needs: [discover-environments, display-plan]
+    name: 'Manual Approval - ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.discover-environments.outputs.environments) }}
+    environment: 
+      name: ${{ matrix.environment }}-approval
+      
+    steps:
+    - name: Download Plan
+      uses: actions/download-artifact@v4
+      with:
+        name: tfplan-${{ matrix.environment }}
+
+    - name: Generate Plan Summary
+      id: plan
+      run: |
+        PLAN_CONTENT=$(cat tfplan.txt)
+        if grep -q "No changes." tfplan.txt; then
+          echo "summary=✅ No changes. Infrastructure is up-to-date." >> $GITHUB_OUTPUT
+        else
+          SUMMARY=$(grep "Plan:" tfplan.txt || echo "No plan summary found")
+          echo "summary=⚠️ Changes detected: $SUMMARY" >> $GITHUB_OUTPUT
+        fi
+        echo "plan<<EOF" >> $GITHUB_OUTPUT
+        echo "$PLAN_CONTENT" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Pause for approval
+      uses: trstringer/manual-approval@v1
+      with:
+        secret: ${{ github.token }}
+        approvers: ${{ vars.TERRAFORM_APPROVERS }}
+        minimum-approvals: 1
+        issue-title: "Approve Terraform Changes for ${{ matrix.environment }}"
+        issue-body: |
+          Please review and approve the Terraform changes for environment: ${{ matrix.environment }}
+          
+          ## Plan Summary
+          ${{ steps.plan.outputs.summary }}
+          
+          <details><summary>Show Full Plan</summary>
+          
+          ```hcl
+          ${{ steps.plan.outputs.plan }}
+          ```
+          </details>
+          
+          **Approval Required:**
+          - This deployment requires explicit approval to proceed
+          - Please review the plan carefully before approving
+          - Comment 'approve' to approve the deployment
+          
+          **Note:** This approval will timeout after 24 hours if not approved.
+        timeout-minutes: 1440
+
+  terraform-apply:
+    needs: [discover-environments, manual-approval]
+    name: 'Terraform Apply - ${{ matrix.environment }}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: ${{ fromJson(needs.discover-environments.outputs.environments) }}
+    environment: 
+      name: ${{ matrix.environment }}
+      url: ${{ steps.apply_output.outputs.environment_url }}
+    defaults:
+      run:
+        working-directory: PartIII/environments/${{ matrix.environment }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.7.0"
+
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Download Plan
+      uses: actions/download-artifact@v4
+      with:
+        name: tfplan-${{ matrix.environment }}
+        path: PartIII/environments/${{ matrix.environment }}
+
+    - name: Terraform Apply
+      id: apply
+      run: terraform apply -auto-approve tfplan

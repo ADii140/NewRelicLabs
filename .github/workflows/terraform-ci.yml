@@ -1,0 +1,119 @@
+name: 'Terraform - CI Validation'
+
+on:
+  push:
+    branches:
+      - '**'
+      - '!main'
+  pull_request:
+    paths:
+      - 'PartIII/environments/**/*.tf'
+      - 'PartIII/environments/**/*.tfvars'
+      - '.github/workflows/terraform-ci.yml'
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+  NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_dirs: ${{ steps.set-dirs.outputs.changed_dirs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Changed Directories
+        id: set-dirs
+        run: |
+          # For new branches or first commits, check all environments
+          if ! git rev-parse --verify HEAD~1 >/dev/null 2>&1; then
+            echo "New branch detected - checking all environments"
+            CHANGED_DIRS=$(find PartIII/environments/* -type d -maxdepth 0 | jq -R -s -c 'split("\n")[:-1]')
+            echo "changed_dirs=${CHANGED_DIRS}" >> $GITHUB_OUTPUT
+            echo "Checking all Terraform directories:"
+            echo "$CHANGED_DIRS" | jq -r '.[]'
+            exit 0
+          fi
+
+          # Determine the comparison base
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "Checking changes in pull request"
+            git fetch origin ${{ github.base_ref }}
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '^PartIII/environments/.*\.\(tf\|tfvars\)$' || true)
+          else
+            echo "Checking changes in push"
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep '^PartIII/environments/.*\.\(tf\|tfvars\)$' || true)
+          fi
+          
+          # If no changes detected in diff, check if we're in a new branch
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No changes detected in diff, checking current branch files"
+            CHANGED_FILES=$(git ls-files | grep '^PartIII/environments/.*\.\(tf\|tfvars\)$' || true)
+          fi
+          
+          # Extract unique directory paths (up to environment level)
+          CHANGED_DIRS=$(echo "$CHANGED_FILES" | sed -E 's|^(PartIII/environments/[^/]+).*|\1|' | sort -u | jq -R -s -c 'split("\n")[:-1]')
+          
+          # Set output
+          echo "changed_dirs=${CHANGED_DIRS}" >> $GITHUB_OUTPUT
+          
+          # Display appropriate message based on changes
+          if [ "$CHANGED_DIRS" == "[]" ] || [ -z "$CHANGED_FILES" ]; then
+            echo "No Terraform directories were changed in this commit."
+          else
+            echo "Changed Terraform directories:"
+            echo "$CHANGED_DIRS" | jq -r '.[]'
+          fi
+
+  terraform-plan:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.changed_dirs != '[]' && needs.detect-changes.outputs.changed_dirs != '' }}
+    name: 'Terraform Plan - ${{ matrix.directory }}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory: ${{ fromJson(needs.detect-changes.outputs.changed_dirs) }}
+      fail-fast: false
+    
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.7.0"
+
+    - name: Terraform Init
+      run: terraform init
+      
+    - name: Terraform Plan
+      id: plan
+      run: |
+        echo "::group::Terraform Plan Output"
+        echo "Running terraform plan for ${{ matrix.directory }}"
+        echo "----------------------------------------"
+        terraform plan -no-color -input=false
+        planExitCode=$?
+        echo "----------------------------------------"
+        echo "::endgroup::"
+        exit $planExitCode
+      continue-on-error: true
+
+    - name: Check Plan Status
+      if: steps.plan.outcome == 'failure'
+      run: |
+        echo "Terraform plan failed for ${{ matrix.directory }}"
+        exit 1
