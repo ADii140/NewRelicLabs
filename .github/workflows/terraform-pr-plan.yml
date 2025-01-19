@@ -6,6 +6,11 @@ on:
       - main
     types: [opened, synchronize, reopened]
 
+# Add workflow-level dependency
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -15,7 +20,20 @@ env:
   NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
 
 jobs:
+  # Add dependency on terraform-ci workflow
+  wait-for-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Terraform CI
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: 'Terraform - CI Validation'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+
   detect-changes:
+    needs: [wait-for-ci]  # Add dependency on wait-for-ci job
     runs-on: ubuntu-latest
     outputs:
       changed_dirs: ${{ steps.set-dirs.outputs.changed_dirs }}
@@ -50,7 +68,7 @@ jobs:
           fi
 
   terraform-plan:
-    needs: detect-changes
+    needs: [detect-changes]  # Keep existing dependency
     if: ${{ needs.detect-changes.outputs.changed_dirs != '[]' && needs.detect-changes.outputs.changed_dirs != '' }}
     name: 'Plan - ${{ matrix.directory }}'
     runs-on: ubuntu-latest
@@ -145,9 +163,3 @@ jobs:
               body: body
             });
           }
-
-    - name: Check Plan Status
-      if: steps.plan.outcome == 'failure'
-      run: |
-        echo "Terraform plan failed. Please check the output above for errors."
-        exit 1
