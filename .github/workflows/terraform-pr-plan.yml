@@ -1,0 +1,147 @@
+name: 'Terraform - PR Plan'
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  NEW_RELIC_API_KEY: ${{ secrets.NEW_RELIC_API_KEY }}
+  NEW_RELIC_ACCOUNT_ID: ${{ secrets.NEW_RELIC_ACCOUNT_ID }}
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changed_dirs: ${{ steps.set-dirs.outputs.changed_dirs }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Changed Directories
+        id: set-dirs
+        run: |
+          # Fetch base branch
+          git fetch origin ${{ github.base_ref }}
+          
+          # Get changed files between PR and base branch
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep '^PartIII/environments/.*\.tf$' || true)
+          
+          # Extract unique directory paths
+          CHANGED_DIRS=$(echo "$CHANGED_FILES" | sed -E 's|^(PartIII/environments/[^/]+).*|\1|' | sort -u | jq -R -s -c 'split("\n")[:-1]')
+          
+          # Set output
+          echo "changed_dirs=${CHANGED_DIRS}" >> $GITHUB_OUTPUT
+          
+          # Create summary of changes
+          if [ "$CHANGED_DIRS" == "[]" ] || [ -z "$CHANGED_FILES" ]; then
+            echo "### No Terraform Changes Detected" >> $GITHUB_STEP_SUMMARY
+            echo "No Terraform directories were modified in this pull request." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### Changed Terraform Directories" >> $GITHUB_STEP_SUMMARY
+            echo "$CHANGED_DIRS" | jq -r '.[]' | sed 's/^/- /' >> $GITHUB_STEP_SUMMARY
+          fi
+
+  terraform-plan:
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.changed_dirs != '[]' && needs.detect-changes.outputs.changed_dirs != '' }}
+    name: 'Plan - ${{ matrix.directory }}'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        directory: ${{ fromJson(needs.detect-changes.outputs.changed_dirs) }}
+      fail-fast: false
+    
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: "1.7.0"
+
+    - name: Terraform Init
+      run: terraform init
+      
+    - name: Terraform Plan
+      id: plan
+      run: |
+        terraform plan -no-color -input=false -detailed-exitcode > plan.txt 2>&1
+        EXIT_CODE=$?
+        echo "${EXIT_CODE}"
+        echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+        
+        # Check if plan has changes
+        if [ $EXIT_CODE -eq 0 ]; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+        fi
+      continue-on-error: true
+
+    - name: Post Plan to PR
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const fs = require('fs');
+          const planOutput = fs.readFileSync('${{ matrix.directory }}/plan.txt', 'utf8');
+          const exitCode = '${{ steps.plan.outputs.exit_code }}';
+          
+          let status = '✅';
+          if (exitCode === '1') {
+            status = '❌';
+          } else if (exitCode === '2') {
+            status = '⚠️';
+          }
+          
+          if (planOutput.includes('No changes.')) {
+            const body = `### Terraform Plan for \`${{ matrix.directory }}\` ${status}
+            No changes. Infrastructure is up-to-date.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+          } else {
+            const planSummary = planOutput.split('\n')
+              .filter(line => line.match(/Plan:|Changes to Outputs:|No changes./))
+              .join('\n');
+            
+            const body = `### Terraform Plan for \`${{ matrix.directory }}\` ${status}
+            
+            <details><summary>Plan Summary</summary>
+            
+            \`\`\`diff
+            ${planSummary}
+            \`\`\`
+            </details>
+            
+            <details><summary>Full Plan</summary>
+            
+            \`\`\`diff
+            ${planOutput}
+            \`\`\`
+            </details>`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: body
+            });
+          }

@@ -1,0 +1,35 @@
+name: 'Terraform - Documentation'
+
+on:
+  push:
+    branches:
+      - '**'
+      - '!main'
+    paths:
+      - 'PartIII/**/*.tf'
+      - '.github/workflows/terraform-docs.yml'
+
+jobs:
+  generate_docs:
+    name: 'Generate Documentation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Generate TF docs - Modules
+        uses: terraform-docs/gh-actions@v1.3.0
+        with:
+          working-dir: PartIII/
+          recursive: true
+          recursive-path: modules
+          git-push: "true"
+
+      - name: Generate TF docs - Environments
+        uses: terraform-docs/gh-actions@v1.3.0
+        with:
+          working-dir: PartIII/
+          recursive: true
+          recursive-path: environments
+          git-push: "true"

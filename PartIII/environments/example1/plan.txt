@@ -1,0 +1,169 @@
+
+Terraform used the selected providers to generate the following execution
+plan. Resource actions are indicated with the following symbols:
+  + create
+
+Terraform will perform the following actions:
+
+  # module.alert_conditions.newrelic_synthetics_alert_condition.google[0] will be created
+  + resource "newrelic_synthetics_alert_condition" "google" {
+      + enabled     = true
+      + entity_guid = (known after apply)
+      + id          = (known after apply)
+      + monitor_id  = (known after apply)
+      + name        = "Googe ping failed"
+      + policy_id   = (known after apply)
+    }
+
+  # module.alert_conditions.newrelic_synthetics_alert_condition.onet[0] will be created
+  + resource "newrelic_synthetics_alert_condition" "onet" {
+      + enabled     = true
+      + entity_guid = (known after apply)
+      + id          = (known after apply)
+      + monitor_id  = (known after apply)
+      + name        = "Onet ping failed"
+      + policy_id   = (known after apply)
+    }
+
+  # module.email_channel.newrelic_notification_channel.emailchannel will be created
+  + resource "newrelic_notification_channel" "emailchannel" {
+      + account_id     = (known after apply)
+      + active         = true
+      + destination_id = (known after apply)
+      + id             = (known after apply)
+      + name           = "email-channel"
+      + product        = "IINT"
+      + status         = (known after apply)
+      + type           = "EMAIL"
+
+      + property {
+          + key           = "customDetailsEmail"
+          + value         = "issue id - {{issueId}}"
+            # (2 unchanged attributes hidden)
+        }
+      + property {
+          + key           = "subject"
+          + value         = "{{issueId}}"
+            # (2 unchanged attributes hidden)
+        }
+    }
+
+  # module.email_destination.newrelic_notification_destination.email will be created
+  + resource "newrelic_notification_destination" "email" {
+      + account_id = (known after apply)
+      + active     = true
+      + guid       = (known after apply)
+      + id         = (known after apply)
+      + last_sent  = (known after apply)
+      + name       = "email destination"
+      + status     = (known after apply)
+      + type       = "EMAIL"
+
+      + property {
+          + key           = "email"
+          + value         = "PUTYOURSEMAILHERE@domain.com"
+            # (2 unchanged attributes hidden)
+        }
+    }
+
+  # module.policy.newrelic_alert_policy.policy will be created
+  + resource "newrelic_alert_policy" "policy" {
+      + account_id          = (known after apply)
+      + id                  = (known after apply)
+      + incident_preference = "PER_CONDITION_AND_TARGET"
+      + name                = "prod"
+    }
+
+  # module.synthetic.newrelic_synthetics_monitor.google[0] will be created
+  + resource "newrelic_synthetics_monitor" "google" {
+      + account_id        = (known after apply)
+      + id                = (known after apply)
+      + locations_public  = [
+          + "AWS_EU_WEST_3",
+        ]
+      + name              = "Google ping"
+      + period            = "EVERY_MINUTE"
+      + period_in_minutes = (known after apply)
+      + status            = "ENABLED"
+      + type              = "SIMPLE"
+      + uri               = "https://google.com"
+      + verify_ssl        = false
+    }
+
+  # module.synthetic.newrelic_synthetics_monitor.onet[0] will be created
+  + resource "newrelic_synthetics_monitor" "onet" {
+      + account_id        = (known after apply)
+      + id                = (known after apply)
+      + locations_public  = [
+          + "AWS_EU_WEST_2",
+          + "AWS_EU_WEST_3",
+        ]
+      + name              = "Onet ping"
+      + period            = "EVERY_MINUTE"
+      + period_in_minutes = (known after apply)
+      + status            = "ENABLED"
+      + type              = "SIMPLE"
+      + uri               = "https://onet.pl"
+      + verify_ssl        = false
+    }
+
+  # module.workflow.newrelic_workflow.workflow will be created
+  + resource "newrelic_workflow" "workflow" {
+      + account_id            = (known after apply)
+      + destinations_enabled  = true
+      + enabled               = true
+      + enrichments_enabled   = true
+      + guid                  = (known after apply)
+      + id                    = (known after apply)
+      + last_run              = (known after apply)
+      + muting_rules_handling = "NOTIFY_ALL_ISSUES"
+      + name                  = "send-email-workflow"
+      + workflow_id           = (known after apply)
+
+      + destination {
+          + channel_id              = (known after apply)
+          + name                    = (known after apply)
+          + notification_triggers   = (known after apply)
+          + type                    = (known after apply)
+          + update_original_message = true
+        }
+
+      + issues_filter {
+          + filter_id = (known after apply)
+          + name      = "filter-name"
+          + type      = "FILTER"
+
+          + predicate {
+              + attribute = "accumulations.policyName"
+              + operator  = "EXACTLY_MATCHES"
+              + values    = [
+                  + "prod",
+                ]
+            }
+          + predicate {
+              + attribute = "priority"
+              + operator  = "EQUAL"
+              + values    = [
+                  + "CRITICAL",
+                ]
+            }
+        }
+    }
+
+Plan: 8 to add, 0 to change, 0 to destroy.
+
+Warning: Deprecated Resource
+
+  with module.alert_conditions.newrelic_synthetics_alert_condition.google,
+  on ../../modules/newrelic_synthetics_alert_condtion/main.tf line 11, in resource "newrelic_synthetics_alert_condition" "google":
+  11: resource "newrelic_synthetics_alert_condition" "google" {
+
+The `newrelic_synthetics_alert_condition` resource is deprecated and will be
+removed in the next major release.
+
+(and 3 more similar warnings elsewhere)
+
+─────────────────────────────────────────────────────────────────────────────
+
+Note: You didn't use the -out option to save this plan, so Terraform can't
+guarantee to take exactly these actions if you run "terraform apply" now.
