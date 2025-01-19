@@ -80,7 +80,7 @@ jobs:
       run: |
         terraform plan -no-color -input=false -detailed-exitcode > plan.txt 2>&1
         EXIT_CODE=$?
-        cat plan.txt
+        echo "${EXIT_CODE}"
         echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
         
         # Check if plan has changes
