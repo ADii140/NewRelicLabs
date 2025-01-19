@@ -6,15 +6,15 @@ terraform {
     }
   }
   backend "azurerm" {
-    resource_group_name   = "demo-resource-group"
-    storage_account_name  = "demostorageaccount"
-    container_name        = "tfstate"
-    key                   = "example1.terraform.tfstate"
+    resource_group_name  = "demo-resource-group"
+    storage_account_name = "demostorageaccount"
+    container_name       = "tfstate"
+    key                  = "example1.terraform.tfstate"
   }
 }
 
 provider "newrelic" {
-  region     = "EU"
+  region = "EU"
 }
 
 module "synthetic" {
