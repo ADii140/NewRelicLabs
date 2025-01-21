@@ -5,6 +5,10 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened]
+    paths:
+      - 'PartIII/environments/**/*.tf'
+      - 'PartIII/environments/**/*.tfvars'
+      - '.github/workflows/terraform-pr-plan.yml'
 
 env:
   ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
