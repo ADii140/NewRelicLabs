@@ -21,6 +21,7 @@ To get started with this repository, follow the instructions provided in the Med
 For a detailed step-by-step guide, please refer to the Medium articles:
 - [Managing New Relic with Terraform Part I: A Comprehensive Guide](https://medium.com/@a.klosowski23/managing-new-relic-with-terraform-part-i-a-comprehensive-guide-6b6aa633a7c9)
 - [Managing New Relic with Terraform Part II: A Comprehensive Guide](https://medium.com/@a.klosowski23/managing-new-relic-with-terraform-part-ii-a-comprehensive-guide-f7f6f812c4a3)
+- [Managing New Relic with Terraform Part III: A Comprehensive Guide](https://medium.com/p/5bafed7d9c0f)
 
 ## Contributing
 
